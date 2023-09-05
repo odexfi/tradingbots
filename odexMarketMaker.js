@@ -4,16 +4,33 @@ const contracts = require('./../contracts.json');
 require("dotenv").config();
 
 const markets = [
-    { feed: 'coinbase', feedRef: 'BTC-USD', odexMarket: contracts.wbtcMarket, spread: 500000n, odexPrice: 0n, bidAmount: 10000000n, askAmount: 400000000000000n },
-    { feed: 'coinbase', feedRef: 'ETH-USD', odexMarket: contracts.wethMarket, spread: 500000n, odexPrice: 0n, bidAmount: 10000000n, askAmount: 6000000000000000n },
-    //{ feed: 'linear', feedRef: 'ODEX-USD', odexMarket: '0xC7e1bbdd1E057Af672A2126c7bE0dC480b93c2cb', spread: 500000n, odexPrice: 0n, bidAmount: 10000000n, askAmount: 600000000000000000n },  
+    { feed: 'linear', feedRef: 'ODEX-USD', odexMarket: contracts.odexMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseWS', feedRef: 'BTC-USD', odexMarket: contracts.wbtcMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '1' },
+    { feed: 'coinbaseWS', feedRef: 'ETH-USD', odexMarket: contracts.wethMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.1' },
+    { feed: 'coinbaseREST', feedRef: 'DOGE-USD', odexMarket: contracts.dogeMarket, odexPrice: 0n, bidAmount: 100000000n, tickRounding: '0.0001' },
+    { feed: 'coinbaseREST', feedRef: 'MATIC-USD', odexMarket: contracts.maticMarket, odexPrice: 0n, bidAmount: 100000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseREST', feedRef: 'SHIB-USD', odexMarket: contracts.shibMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.000001' },
+    { feed: 'coinbaseREST', feedRef: 'LINK-USD', odexMarket: contracts.linkMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseREST', feedRef: 'UNI-USD', odexMarket: contracts.uniMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseREST', feedRef: 'LDO-USD', odexMarket: contracts.ldoMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.001' },
+    { feed: 'coinbaseREST', feedRef: 'ARB-USD', odexMarket: contracts.arbMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.001' },
+    { feed: 'coinbaseREST', feedRef: 'MKR-USD', odexMarket: contracts.mkrMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '1' },
+    { feed: 'coinbaseREST', feedRef: 'OP-USD', odexMarket: contracts.opMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.001' },
+    { feed: 'coinbaseREST', feedRef: 'AAVE-USD', odexMarket: contracts.aaveMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseREST', feedRef: 'SNX-USD', odexMarket: contracts.snxMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.01' },
+    { feed: 'coinbaseREST', feedRef: 'CRV-USD', odexMarket: contracts.crvMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.001' },
+    { feed: 'coinbaseREST', feedRef: 'PAXG-USD', odexMarket: contracts.paxgMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '1' },
+    { feed: 'coinbaseREST', feedRef: 'RPL-USD', odexMarket: contracts.rplMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.1' },
+    { feed: 'coinbaseREST', feedRef: 'COMP-USD', odexMarket: contracts.compMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.1' },
+    { feed: 'krakenREST', feedRef: 'GMXUSD', odexMarket: contracts.gmxMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.1' },
+    { feed: 'coinbaseREST', feedRef: 'ENS-USD', odexMarket: contracts.ensMarket, odexPrice: 0n, bidAmount: 1000000000n, tickRounding: '0.1' },
 ];
-const tradeFrequencyLimit = 10 * 1000; // 1 trade every 10 seconds max, + order exec time
+const tradeFrequencyLimit = 60 * 1000; // 1 trade every 60 seconds max, + order exec time
 
-const provider = new ethers.providers.JsonRpcProvider('https://scroll-sepolia.chainstacklabs.com');
+const provider = new ethers.providers.JsonRpcProvider('https://sepolia-rollup.arbitrum.io/rpc');
 
 const loadWallet = new ethers.Wallet(process.env.ODEX_MM_KEY);
-const hotWallet = loadWallet.connect(provider);
+const mmWallet = loadWallet.connect(provider);
 let inTrade = false;
 
 const odexMarketsAbi = [
@@ -43,16 +60,19 @@ const erc20Abi = [
 ];
 
 const checkApprovals = async (market) => {
+    console.log(`Checking approvals: ${market.feedRef}`);
     const maxUint256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
-    const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, hotWallet);
+    const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, mmWallet);
     const baseAssetAddress = await odexMarket.baseAsset();
     const tokenAddress = await odexMarket.token();
-    const baseAsset = new ethers.Contract(baseAssetAddress, erc20Abi, hotWallet);
-    const baseBalance = await baseAsset.balanceOf(hotWallet.address);
-    const baseAllowance = await baseAsset.allowance(hotWallet.address, market.odexMarket);
-    const token = new ethers.Contract(tokenAddress, erc20Abi, hotWallet);
-    const tokenBalance = await token.balanceOf(hotWallet.address);
-    const tokenAllowance = await token.allowance(hotWallet.address, market.odexMarket);
+    const baseAsset = new ethers.Contract(baseAssetAddress, erc20Abi, mmWallet);
+    const baseBalance = await baseAsset.balanceOf(mmWallet.address);
+    const baseAllowance = await baseAsset.allowance(mmWallet.address, market.odexMarket);
+    const token = new ethers.Contract(tokenAddress, erc20Abi, mmWallet);
+    const tokenBalance = await token.balanceOf(mmWallet.address);
+    const tokenAllowance = await token.allowance(mmWallet.address, market.odexMarket);
+
+    //console.log('Check Balances', market.feedRef, baseBalance, tokenBalance)
     while(inTrade) await new Promise(r => setTimeout(r, 1000));
     inTrade = true;
     if (BigInt(baseAllowance) < BigInt(baseBalance)) {
@@ -69,6 +89,7 @@ const checkApprovals = async (market) => {
 }
 
 const setupLinear = async (market) => {
+    console.log(`setupLinear: ${market.feedRef}`);
     const startPrice = 10000000n;
     const endPrice = 20000000n;
     const oneMonthInSeconds = 30n * 24n * 60n * 60n;
@@ -84,7 +105,8 @@ const setupLinear = async (market) => {
     }, 6000);
 }
 
-const setupCoinbase = async (market) => {
+const setupCoinbaseWS = async (market) => {
+    console.log(`setupCoinbaseWS: ${market.feedRef}`);
     const socket = new WebSocket('wss://ws-feed.pro.coinbase.com');
     socket.on('open', function open() {
         const subscribeMsg = {
@@ -103,24 +125,79 @@ const setupCoinbase = async (market) => {
     socket.on('error', (err) => console.log(`WebSocket Error: ${err}`));
 }
 
+const setupCoinbaseREST = async (market) => {
+    //console.log(`setupCoinbaseREST: ${market.feedRef}`);
+    const endPoint = `https://api.coinbase.com/v2/prices/${market.feedRef}/buy`;
+    await fetch(endPoint).then(response => response.json()).then((responseJSON) => {
+        if (!responseJSON.data) {
+            console.log('odexMarketMaker.js Error 134', responseJSON);
+            return;
+        }
+        const usdTrimmedPrice = parseFloat(responseJSON.data.amount).toFixed(6);
+        const usdPrice = ethers.utils.parseUnits(usdTrimmedPrice, 6);
+        priceUpdate(usdPrice, market);
+    });
+    setTimeout(() => {
+        setupCoinbaseREST(market);
+    }, tradeFrequencyLimit);
+}
+
+const setupBinanceREST = async (market) => {
+    //console.log(`setupBinanceREST: ${market.feedRef}`);
+    // restricted from US servers and IP addresses
+    const endPoint = `https://api.binance.com/api/v3/ticker/price?symbol=${market.feedRef}`;
+    await fetch(endPoint).then(response => response.json()).then((responseJSON) => {
+        if (!responseJSON.price) {
+            console.log('odexMarketMaker.js Error 151', responseJSON);
+            return;
+        }
+        const usdTrimmedPrice = parseFloat(responseJSON.price).toFixed(6);
+        const usdPrice = ethers.utils.parseUnits(usdTrimmedPrice, 6);
+        priceUpdate(usdPrice, market);
+    });
+    setTimeout(() => {
+        setupBinanceREST(market);
+    }, tradeFrequencyLimit);
+}
+
+const setupKrakenREST = async (market) => {
+    const endPoint = `https://api.kraken.com/0/public/Ticker?pair=${market.feedRef}`;
+    await fetch(endPoint).then(response => response.json()).then((responseJSON) => {
+        if (!responseJSON.result) {
+            console.log('odexMarketMaker.js Error 166', responseJSON);
+            return;
+        }
+        const usdTrimmedPrice = parseFloat(responseJSON.result[market.feedRef].a[0]).toFixed(6);
+        const usdPrice = ethers.utils.parseUnits(usdTrimmedPrice, 6);
+        priceUpdate(usdPrice, market);
+    });
+    setTimeout(() => {
+        setupKrakenREST(market);
+    }, tradeFrequencyLimit);
+}
+
 const priceUpdate = async (price, market) => {
-    console.log(`priceUpdate: ${market.feedRef} ${price}`);
-    if (price > market.odexPrice + market.spread || price < market.odexPrice - market.spread) {
+    //console.log(`priceUpdate: ${market.feedRef} ${price}`);
+    const rounding = BigInt(ethers.utils.parseUnits(market.tickRounding, 6));
+    const spread = rounding * 3n;
+    if (price > market.odexPrice + spread || price < market.odexPrice - spread) {
         if (inTrade) return false;
         inTrade = true;
         market.odexPrice = BigInt(price);
-        const randomFactor = 0.5 + Math.random() * 0.5; // 50-100% of amount
-        const bidAmount = BigInt((Number(market.bidAmount) * randomFactor).toFixed());
-        const askAmount = BigInt((Number(market.askAmount) * randomFactor).toFixed());
-        const bidPrice = market.odexPrice - market.spread;
-        const askPrice = market.odexPrice + market.spread;
-        console.log(`Trading: ${market.feedRef} ${ethers.utils.formatUnits(price,6)}`);
+        const randomFactor = BigInt(Number(50 + Math.random() * 50).toFixed()); // 50-100% of amount
+        const bidAmount = market.bidAmount * randomFactor / 100n;
+        const askAmount = bidAmount * 1000000000000000000n / market.odexPrice;
+        const bidPrice = market.odexPrice - spread;
+        const askPrice = market.odexPrice + spread;
+        console.log(`Trading: ${market.feedRef} $${ethers.utils.formatUnits(price,6)}`);
         await clearOrders(market);
-        const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, hotWallet);
+        const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, mmWallet);
         const bidAmounts = [bidAmount, bidAmount*2n, bidAmount*3n, bidAmount*4n, bidAmount*5n, bidAmount*6n];
-        const bidPrices = [bidPrice, bidPrice-1000000n, bidPrice-2000000n, bidPrice-3000000n, bidPrice-4000000n, bidPrice-5000000n];
+        const bidPrices = [bidPrice, bidPrice-rounding, bidPrice-(2n*rounding), bidPrice-(3n*rounding), bidPrice-(4n*rounding), bidPrice-(5n*rounding)];
         const askAmounts = [askAmount, askAmount*2n, askAmount*3n, askAmount*4n, askAmount*5n, askAmount*6n];
-        const askPrices = [askPrice, askPrice+1000000n, askPrice+2000000n, askPrice+3000000n, askPrice+4000000n, askPrice+5000000n];
+        const askPrices = [askPrice, askPrice+rounding, askPrice+(2n*rounding), askPrice+(3n*rounding), askPrice+(4n*rounding), askPrice+(5n*rounding)];
+        //let gasPrice = await provider.getGasPrice();
+        //gasPrice = Math.floor(gasPrice * 1.05);
         const txBid1 = await odexMarket.multiTrade(bidAmounts, bidPrices, askAmounts, askPrices);
         await txBid1.wait();
         console.log('Executed.');
@@ -129,16 +206,16 @@ const priceUpdate = async (price, market) => {
 }
 
 const clearOrders = async (market) => {
-    const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, hotWallet);
+    const odexMarket = new ethers.Contract(market.odexMarket, odexMarketsAbi, mmWallet);
     const ob = await odexMarket.orderbook();
     let cancelBids = [];
     let cancelAsks = [];
     for (let i = 0; i < 100; i++) {
-        if (ob[2] == hotWallet.address) {
+        if (ob[2] == mmWallet.address) {
             if (ob[1] > market.odexPrice - market.spread) cancelBids.push(i);
             if (ob[1] < market.odexPrice - 20000000n) cancelBids.push(i); // $20 out of range
         }
-        if (ob[5] == hotWallet.address) {
+        if (ob[5] == mmWallet.address) {
             if (ob[4] < market.odexPrice + market.spread) cancelAsks.push(i);
             if (ob[1] > market.odexPrice + 20000000n) cancelBids.push(i);
         }
@@ -153,7 +230,10 @@ const clearOrders = async (market) => {
 const init = async () => {
     for (const market of markets) {
         await checkApprovals(market);
-        if (market.feed == 'coinbase') setupCoinbase(market);
+        if (market.feed == 'coinbaseWS') setupCoinbaseWS(market);
+        if (market.feed == 'coinbaseREST') setupCoinbaseREST(market);
+        if (market.feed == 'binanceREST') setupBinanceREST(market);
+        if (market.feed == 'krakenREST') setupKrakenREST(market);
         if (market.feed == 'linear') setupLinear(market);
     }
 }
